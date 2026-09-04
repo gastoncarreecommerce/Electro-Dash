@@ -1,18 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Endpoint de diagnóstico: lista los sellers tal como están registrados en
- * VTEX (id + name exactos), para poder comparar contra src/lib/seller.ts
- * cuando el filtrado por nombre no matchea ninguna orden.
+ * Endpoint de diagnóstico: lista TODOS los sellers tal como están
+ * registrados en VTEX (id + name exactos), para poder comparar contra
+ * src/lib/seller.ts cuando el filtrado por nombre no matchea ninguna orden.
  *
  * Pagina todo el catálogo (VTEX cappea _per_page a 100 por más que se pida
- * más), y por default solo devuelve los que matchean "hogar" o "electro"
- * para no volcar acá cientos de sellers. ?all=1 devuelve el listado completo.
+ * más).
  */
-export async function GET(req: NextRequest) {
+export async function GET() {
   const account = process.env.VTEX_ACCOUNT;
   const key = process.env.VTEX_APP_KEY;
   const token = process.env.VTEX_APP_TOKEN;
@@ -21,8 +20,6 @@ export async function GET(req: NextRequest) {
   if (!account || !key || !token || !base) {
     return NextResponse.json({ error: "Missing VTEX env vars" }, { status: 500 });
   }
-
-  const showAll = req.nextUrl.searchParams.get("all") === "1";
 
   try {
     const all: any[] = [];
@@ -50,17 +47,9 @@ export async function GET(req: NextRequest) {
       id: s?.SellerId ?? s?.id ?? s?.sellerId ?? null,
       name: s?.Name ?? s?.name ?? null,
       isActive: s?.IsActive ?? s?.isActive ?? null,
-      matches: /hogar|electro/i.test(String(s?.Name ?? s?.name ?? "")),
     }));
 
-    const matches = sellers.filter((s) => s.matches);
-
-    return NextResponse.json({
-      totalSellers: sellers.length,
-      matchesCount: matches.length,
-      matches,
-      ...(showAll ? { allSellers: sellers } : {}),
-    });
+    return NextResponse.json({ totalSellers: sellers.length, sellers });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "sellers_fetch_failed" }, { status: 500 });
   }
