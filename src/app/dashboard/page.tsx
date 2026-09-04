@@ -7,6 +7,7 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   ComposedChart, Line, Bar,
 } from "recharts";
+import * as XLSX from "xlsx";
 
 /* ─────────────────── Constants ─────────────────── */
 
@@ -283,9 +284,9 @@ export default function DashboardPage() {
       {/* ─── Tab: Products ─── */}
       {activeTab === "products" && (
         <div className="space-y-6 animate-fade-in">
-          <ChartPanel title="Top 10 Productos Más Populares" subtitle="Productos más vendidos por unidades">
+          <ChartPanel title="Top 6 Productos Más Populares" subtitle="Productos más vendidos por unidades">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {(data.topProducts ?? []).slice(0, 10).map((p: any, idx: number) => {
+              {(data.products ?? []).slice(0, 6).map((p: any, idx: number) => {
                 const medalColors = ["from-amber-400 to-yellow-500", "from-slate-300 to-slate-400", "from-orange-400 to-amber-500"];
                 return (
                   <article key={`${p.refId}-${idx}`} className="group rounded-xl border border-slate-200 bg-white p-4 transition-all hover:shadow-md hover:border-slate-300">
@@ -319,6 +320,8 @@ export default function DashboardPage() {
               })}
             </div>
           </ChartPanel>
+
+          <ProductsTable products={data.products ?? []} periodLabel={MODE_CONFIG[mode].label} />
         </div>
       )}
 
@@ -571,6 +574,104 @@ function HourlyHeatmap({ rows }: { rows: { date: string; hours: number[] }[] }) 
         </div>
       </div>
     </div>
+  );
+}
+
+function ProductsTable({ products, periodLabel }: { products: any[]; periodLabel: string }) {
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
+
+  const filtered = products.filter((p: any) =>
+    !search ||
+    p.name?.toLowerCase().includes(search.toLowerCase()) ||
+    p.refId?.toLowerCase?.().includes(search.toLowerCase()) ||
+    String(p.ean || "").includes(search)
+  );
+  const visible = showAll ? filtered : filtered.slice(0, 25);
+
+  const handleExport = useCallback(() => {
+    const rows = filtered.map((p: any, i: number) => ({
+      "#": i + 1,
+      EAN: p.ean || "",
+      REF: p.refId || "",
+      SKU_ID: p.skuId || "",
+      NOMBRE: p.name || "",
+      UNIDADES_VENDIDAS: p.units || 0,
+      PEDIDOS: p.orders || 0,
+      PRECIO_PROMEDIO: p.avgUnitPrice || 0,
+      REVENUE_TOTAL: p.skuPrice || 0,
+      LINK: p.link || "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 4 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 50 },
+      { wch: 18 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 40 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Productos");
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `hogar-electro-productos-${today}.xlsx`);
+  }, [filtered]);
+
+  return (
+    <ChartPanel title={`Todos los Productos (${periodLabel})`} subtitle={`${filtered.length} SKUs vendidos en el período`}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px]">
+          <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nombre, REF o EAN..."
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition shadow-sm" />
+        </div>
+        <button onClick={handleExport} disabled={!filtered.length}
+          className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-500/20 hover:bg-emerald-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" /></svg>
+          Descargar XLSX
+        </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50 text-left">
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500">#</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500">Producto</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500">EAN</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500">REF</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Unidades</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Pedidos</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Precio Prom.</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((p: any, i: number) => (
+              <tr key={`${p.refId}-${i}`} className="border-b border-slate-50 table-row-hover">
+                <td className="px-3 py-2.5 text-slate-400">{i + 1}</td>
+                <td className="px-3 py-2.5 font-medium text-slate-900 max-w-[280px] truncate">{p.name}</td>
+                <td className="px-3 py-2.5 text-slate-500">{p.ean || "—"}</td>
+                <td className="px-3 py-2.5 text-slate-500">{p.refId}</td>
+                <td className="px-3 py-2.5 text-right text-slate-700">{num(p.units)}</td>
+                <td className="px-3 py-2.5 text-right text-slate-500">{num(p.orders)}</td>
+                <td className="px-3 py-2.5 text-right text-slate-600">{money(p.avgUnitPrice)}</td>
+                <td className="px-3 py-2.5 text-right font-semibold text-emerald-600">{money(p.skuPrice)}</td>
+              </tr>
+            ))}
+            {!visible.length && (
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Sin productos para mostrar.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {filtered.length > 25 && (
+        <div className="border-t border-slate-100 pt-3 mt-2 text-center">
+          <button onClick={() => setShowAll(!showAll)} className="text-sm font-medium text-blue-600 hover:text-blue-700 transition">
+            {showAll ? "Ver menos" : `Ver todos (${filtered.length})`}
+          </button>
+        </div>
+      )}
+    </ChartPanel>
   );
 }
 

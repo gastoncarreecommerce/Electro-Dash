@@ -219,7 +219,7 @@ function empty(error?: string) {
     kpis: { gmvTotal: 0, ordersTotal: 0, aov: 0 },
     gmvEvolution: [],
     ordersEvolution: [],
-    topProducts: [],
+    products: [],
     attribution: [{ label: "PAID", value: 0 }, { label: "ORGANIC", value: 0 }],
     utmBreakdown: [],
     funnel: [
@@ -271,7 +271,7 @@ export async function GET(req: NextRequest) {
     const byDayOrders = new Map<string, { created: number; invoiced: number; gross: number }>();
     const byDayHour = new Map<string, number[]>();
     const byMonth = new Map<string, { gmv: number; orders: number; canceled: number }>();
-    const byProduct = new Map<string, { name: string; refId: string; units: number; skuPrice: number; imageUrl?: string; link?: string }>();
+    const byProduct = new Map<string, { name: string; refId: string; skuId: string; ean: string; units: number; skuPrice: number; orders: number; imageUrl?: string; link?: string }>();
     const byPayment = new Map<string, { amount: number; installments: Map<number, number> }>();
     const utmMap = new Map<string, { source: string; medium: string; campaign: string; orders: number; gmv: number }>();
 
@@ -340,14 +340,19 @@ export async function GET(req: NextRequest) {
         const pr = byProduct.get(key) ?? {
           name: it?.name ?? "Sin nombre",
           refId: it?.refId ?? String(it?.id ?? "-"),
+          skuId: String(it?.id ?? ""),
+          ean: it?.ean ?? "",
           units: 0,
           skuPrice: 0,
+          orders: 0,
           imageUrl: it?.imageUrl,
           link: it?.detailUrl ? `${STOREFRONT_BASE}${it.detailUrl}` : undefined,
         };
         pr.units += qty;
         pr.skuPrice += unit * qty;
+        pr.orders += 1;
         pr.imageUrl = pr.imageUrl || it?.imageUrl;
+        if (!pr.ean && it?.ean) pr.ean = it.ean;
         if (!pr.link && it?.detailUrl) pr.link = `${STOREFRONT_BASE}${it.detailUrl}`;
         byProduct.set(key, pr);
       }
@@ -386,10 +391,13 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, v]) => ({ month, gmv: Math.round(v.gmv), orders: v.orders, canceled: v.canceled }));
 
-    const topProducts = Array.from(byProduct.values())
+    const products = Array.from(byProduct.values())
       .sort((a, b) => b.units - a.units)
-      .slice(0, 10)
-      .map((x) => ({ ...x, skuPrice: Math.round(x.skuPrice) }));
+      .map((x) => ({
+        ...x,
+        skuPrice: Math.round(x.skuPrice),
+        avgUnitPrice: x.units ? Math.round(x.skuPrice / x.units) : 0,
+      }));
 
     const paymentRanking = Array.from(byPayment.entries())
       .map(([paymentSystemName, v]) => {
@@ -429,7 +437,7 @@ export async function GET(req: NextRequest) {
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([bucket, v]) => ({ bucket, created: v.created, invoiced: v.invoiced, gross: Math.round(v.gross) })),
       monthlyEvolution,
-      topProducts,
+      products,
       attribution: [{ label: "PAID", value: paid }, { label: "ORGANIC", value: organic }],
       utmBreakdown,
       funnel: [
