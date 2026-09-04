@@ -3,6 +3,7 @@ import { SELLER } from "@/lib/seller";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 export const revalidate = 0;
 
 const norm = (v: string) =>
@@ -166,10 +167,16 @@ async function vtexFetch(path: string) {
   return res.json();
 }
 
+// VTEX's OMS order search hard-caps at 30 pages per query ("Max page
+// exceed (30)"), regardless of per_page. Never request more than that in
+// a single date range.
+const VTEX_MAX_PAGES = 30;
+
 async function fetchOrderIds(fromISO: string, toISO: string, maxPages: number) {
   const range = `creationDate:[${fromISO} TO ${toISO}]`;
   const ids = new Set<string>();
-  for (let page = 1; page <= maxPages; page++) {
+  const cappedMaxPages = Math.min(maxPages, VTEX_MAX_PAGES);
+  for (let page = 1; page <= cappedMaxPages; page++) {
     const qs = new URLSearchParams({
       per_page: "100",
       page: String(page),
@@ -180,6 +187,35 @@ async function fetchOrderIds(fromISO: string, toISO: string, maxPages: number) {
     const list = data?.list ?? data?.items ?? [];
     for (const o of list) if (o?.orderId) ids.add(o.orderId);
     if (!list.length || list.length < 100) break;
+  }
+  return Array.from(ids);
+}
+
+/** Splits [fromISO, toISO) into calendar-month chunks, each queried separately
+ * so a wide range (e.g. "histórico" since 2023) never hits VTEX's 30-page cap
+ * on a single query. */
+function monthChunks(fromISO: string, toISO: string): { from: string; to: string }[] {
+  const chunks: { from: string; to: string }[] = [];
+  let cursor = new Date(fromISO);
+  const end = new Date(toISO);
+  while (cursor < end) {
+    const chunkStart = new Date(cursor);
+    const chunkEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+    const effectiveEnd = chunkEnd < end ? chunkEnd : end;
+    chunks.push({ from: chunkStart.toISOString(), to: effectiveEnd.toISOString() });
+    cursor = chunkEnd;
+  }
+  return chunks;
+}
+
+async function fetchOrderIdsChunked(fromISO: string, toISO: string, maxPagesPerChunk: number) {
+  const chunks = monthChunks(fromISO, toISO);
+  const ids = new Set<string>();
+  const concurrency = 5;
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const batch = chunks.slice(i, i + concurrency);
+    const results = await Promise.all(batch.map((c) => fetchOrderIds(c.from, c.to, maxPagesPerChunk)));
+    for (const chunkIds of results) for (const id of chunkIds) ids.add(id);
   }
   return Array.from(ids);
 }
@@ -259,11 +295,15 @@ export async function GET(req: NextRequest) {
       mode === "custom" ? (dateRangeCustom(fromParam, toParam) || dateRangeLast7Days()) :
       dateRangeTodayLiveGMT3();
 
-    // Un solo seller: se pueden pedir muchas más páginas sin saturar VTEX.
-    const maxPages = mode === "historico" ? 200 : strict ? 40 : mode === "today_live" ? 5 : 20;
+    // Un solo seller: se pueden pedir muchas más páginas sin saturar VTEX,
+    // pero VTEX cappea cada consulta a 30 páginas (ver VTEX_MAX_PAGES), asi
+    // que un rango amplio ("histórico") se parte en chunks mensuales.
+    const maxPages = strict ? VTEX_MAX_PAGES : mode === "today_live" ? 5 : 20;
     const maxDetails = mode === "historico" ? 20000 : strict ? 4000 : mode === "today_live" ? 400 : 2000;
 
-    const ids = await fetchOrderIds(range.from, range.to, maxPages);
+    const ids = mode === "historico"
+      ? await fetchOrderIdsChunked(range.from, range.to, maxPages)
+      : await fetchOrderIds(range.from, range.to, maxPages);
     const raw = await fetchOrderDetails(ids, maxDetails);
     const orders = raw.filter((o) => isOurSeller(o));
 
