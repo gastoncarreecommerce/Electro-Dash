@@ -10,5 +10,5 @@
  */
 export const SELLER = {
   id: process.env.VTEX_SELLER_ID || "",
-  name: "Hogar&Electro",
+  name: "Hogar & Electro (CRF-1659249287299-01)",
 } as const;
